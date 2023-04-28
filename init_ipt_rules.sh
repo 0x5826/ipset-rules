@@ -1,6 +1,6 @@
 #!/bin/sh
 
-mkdir rules && cd rules
+mkdir ipset_rules && cd ipset_rules
 
 lines_number(){
     wc -l $1 | awk -F ' ' '{print $1}'
