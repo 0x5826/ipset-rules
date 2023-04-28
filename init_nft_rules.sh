@@ -1,5 +1,7 @@
 #!/bin/bash
 
+mkdir nft_rules && cd nft_rules
+
 proxy_sets="./nft_proxy_sets.nft"
 
 lines_number(){
