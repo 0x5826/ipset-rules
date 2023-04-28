@@ -1,5 +1,7 @@
 #!/bin/sh
 
+mkdir smartdns_rules && cd smartdns_rules
+
 # 1:GFW List
 curl -sS https://raw.githubusercontent.com/gfwlist/gfwlist/master/gfwlist.txt | \
     base64 -d | sort -u | sed '/^$\|@@/d'| sed 's#!.\+##; s#|##g; s#@##g; s#http:\/\/##; s#https:\/\/##;' | \
