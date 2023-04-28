@@ -1,6 +1,6 @@
 #!/bin/bash
 
-proxy_sets="./proxy_sets.nft"
+proxy_sets="./nft_proxy_sets.nft"
 
 lines_number(){
     wc -l $1 | awk -F ' ' '{print $1}'
