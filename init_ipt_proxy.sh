@@ -77,6 +77,7 @@ clean_remain() {
 case "$1" in
     "start")
         clean_remain
+        init_ipset
         init_ipt_lan_snat
         init_ipt_local_proxy
         init_ipt_lan_proxy
