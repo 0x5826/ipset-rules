@@ -34,7 +34,6 @@ init_ipt_local_proxy() {
     iptables -t nat -A $redir_local -m set --match-set chnroute_v4 dst -j RETURN
     iptables -t nat -A $redir_local -m set ! --match-set common_ports dst -j RETURN
     iptables -t nat -A $redir_local -p tcp -j REDIRECT --to-ports $redirect_port
-    iptables -t nat -A PREROUTING -p tcp -j $redir_local
     iptables -t nat -A OUTPUT -p tcp -j $redir_local
 }
 
