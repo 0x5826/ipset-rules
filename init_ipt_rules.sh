@@ -1,110 +1,93 @@
-#!/bin/sh
+#!/bin/bash
 
-mkdir ipset_rules && cd ipset_rules
+interface="ens160"
 
-lines_number(){
-    wc -l $1 | awk -F ' ' '{print $1}'
+redirect_port="7892"
+tproxy_port="7893"
+
+tproxy_mark="666"
+clash_mark="777"
+
+redir_local="PROXY_LOCAL"
+tproxy_lan="PROXY_LAN"
+
+init_ipset() {
+    rules_path="/etc/clash/ipt_clash_rules"
+
+    ipset restore -f $rules_path/ipset_chnroute_v4
+    sleep 1
+    ipset restore -f $rules_path/ipset_whitelist_v4
+    sleep 1
+    ipset restore -f $rules_path/ipset_common_ports
+    sleep 1
+    ipset restore -f $rules_path/ipset_private_v4
 }
-generate_chnroute_v4_v6(){
-    local chnroute_v4_tmp="./chnroute_v4_tmp.txt"
-    local chnroute_v6_tmp="./chnroute_v6_tmp.txt"
-    local chnroute_v4_list="./chnroute_v4.txt"
-    local chnroute_v6_list="./chnroute_v6.txt"
-    local chnroute_v4_ipset="./ipset_chnroute_v4"
-    local chnroute_v6_ipset="./ipset_chnroute_v6"
 
-    #curl -fsSL 'http://ftp.apnic.net/apnic/stats/apnic/delegated-apnic-latest' | grep ipv4 | grep CN | \
-    #awk -F\| '{ printf("%s/%d\n", $4, 32-log($5)/log(2)) }' \
-    #> $chnroute_v4_tmp
+init_ipt_lan_snat() {
+  iptables -t nat -A POSTROUTING -o $interface -j MASQUERADE
+}
 
-    curl -fsSL 'https://cdn.jsdelivr.net/gh/17mon/china_ip_list@master/china_ip_list.txt' > $chnroute_v4_tmp
-    if [ $? -eq 0 ];then
-        mv $chnroute_v4_tmp $chnroute_v4_list
-        echo -e "[INFO] Updated chnroute_v4 $(lines_number $chnroute_v4_list) items"
-    else
-        rm -f $chnroute_v4_tmp
-        echo -e "[ERROR] Download failed"
+init_ipt_local_proxy() {
+    iptables -t nat -N $redir_local
+    iptables -t nat -A $redir_local -m mark --mark $clash_mark -j RETURN
+    iptables -t nat -A $redir_local -m set --match-set private_v4 dst -j RETURN
+    iptables -t nat -A $redir_local -m set --match-set chnroute_v4 dst -j RETURN
+    iptables -t nat -A $redir_local -m set ! --match-set common_ports dst -j RETURN
+    iptables -t nat -A $redir_local -p tcp -j REDIRECT --to-ports $redirect_port
+    iptables -t nat -A PREROUTING -p tcp -j $redir_local
+    iptables -t nat -A OUTPUT -p tcp -j $redir_local
+}
+
+init_ipt_lan_proxy() {
+    iptables -t mangle -N $tproxy_lan
+    iptables -t mangle -A $tproxy_lan -m mark --mark $clash_mark -j RETURN
+    iptables -t mangle -A $tproxy_lan -m set --match-set private_v4 dst -j RETURN
+#    iptables -t mangle -A $tproxy_lan -m set --match-set whitelist_v4 src -j RETURN
+#    iptables -t mangle -A $tproxy_lan -m set ! --match-set common_ports dst -j RETURN
+    iptables -t mangle -A $tproxy_lan -m set --match-set chnroute_v4 dst -j RETURN
+    iptables -t mangle -A $tproxy_lan -p tcp -j TPROXY --on-port $tproxy_port --tproxy-mark $tproxy_mark
+    iptables -t mangle -A $tproxy_lan -p udp -m multiport --destination-ports 123,443 -j RETURN
+    iptables -t mangle -A $tproxy_lan -p udp -j TPROXY --on-port $tproxy_port --tproxy-mark $tproxy_mark
+    
+    iptables -t mangle -A PREROUTING -j $tproxy_lan
+
+    ip rule add fwmark $tproxy_mark lookup $tproxy_mark
+    ip route add default dev lo table $tproxy_mark
+}
+
+clean_remain() {
+    iptables -t nat -D POSTROUTING -o $interface -j MASQUERADE 2>/dev/null
+
+    iptables -t nat -D OUTPUT -p tcp -j $redir_local 2>/dev/null
+    iptables -t mangle -D PREROUTING -j $tproxy_lan 2>/dev/null
+
+    iptables -t nat -F $redir_local 2>/dev/null
+    iptables -t nat -X $redir_local 2>/dev/null
+    iptables -t mangle -F $tproxy_lan 2>/dev/null
+    iptables -t mangle -X $tproxy_lan 2>/dev/null
+
+    ip rule delete fwmark $tproxy_mark lookup $tproxy_mark 2>/dev/null
+    ip route delete default dev lo table $tproxy_mark 2>/dev/null
+
+    ipset destroy chnroute_v4 2>/dev/null
+    ipset destroy whitelist_v4 2>/dev/null
+    ipset destroy common_ports 2>/dev/null
+    ipset destroy private_v4 2>/dev/null
+}
+
+case "$1" in
+    "start")
+        clean_remain
+        init_ipset
+        init_ipt_lan_snat
+        init_ipt_local_proxy
+        init_ipt_lan_proxy
+        ;;
+    "stop")
+        clean_remain
+        ;;
+    *)
+        echo "[ERROR] Unknow option! allow <start> <stop>."
         exit 1
-    fi
-
-    curl -fsSL 'http://ftp.apnic.net/apnic/stats/apnic/delegated-apnic-latest' | grep ipv6 | grep CN | \
-    awk -F\| '{ printf("%s/%d\n", $4, $5) }' \
-    > $chnroute_v6_tmp
-
-    if [ $? -eq 0 ];then
-        mv $chnroute_v6_tmp $chnroute_v6_list
-        echo -e "[INFO] Updated chnroute_v6 $(lines_number $chnroute_v6_list) items"
-    else
-        rm -f $chnroute_v6_tmp
-        echo -e "[ERROR] Download failed"
-        exit 1
-    fi
-
-    echo "create chnroute_v4 hash:net family inet hashsize 4096 maxelem 65536" > $chnroute_v4_ipset
-    for ips in `cat $chnroute_v4_list`
-    do
-        echo "add chnroute_v4 $ips" >> $chnroute_v4_ipset
-    done
-    echo -e "[INFO] file $chnroute_v4_ipset: $(lines_number $chnroute_v4_ipset)"
-
-    echo "create chnroute_v6 hash:net family inet6 hashsize 4096 maxelem 65536" > $chnroute_v6_ipset
-    for ips in `cat $chnroute_v6_list`
-    do
-        echo "add chnroute_v6 $ips" >> $chnroute_v6_ipset
-    done
-    echo -e "[INFO] file $chnroute_v6_ipset: $(lines_number $chnroute_v6_ipset)"
-
-    rm -f $chnroute_v4_tmp
-    rm -f $chnroute_v6_tmp
-    rm -f $chnroute_v4_list
-    rm -f $chnroute_v6_list
-}
-
-generate_common_ports(){
-    local ipset_common_ports="./ipset_common_ports"
-
-    common_ports="21 22 23 53 80 123 143 194 443 \
-    465 587 853 993 995 998 \
-    2052 2053 2082 2083 2086 2095 2096 \
-    5222 5228 5229 5230 8080 8443 8880 8888 8889"
-    
-    echo "create common_ports bitmap:port range 0-65535" > $ipset_common_ports
-
-    for common_port in $common_ports
-    do 
-        echo "add common_ports $common_port" >> $ipset_common_ports
-    done
-
-    echo -e "[INFO] file $ipset_common_ports: $(lines_number $ipset_common_ports)"
-}
-
-generate_whitelist_v4(){
-    local ipset_whitelist_v4="./ipset_whitelist_v4"
-    
-    echo "create whitelist_v4 hash:net family inet hashsize 4096 maxelem 65536" > $ipset_whitelist_v4
-    echo "add whitelist_v4 192.168.0.1" >> $ipset_whitelist_v4
-
-    echo -e "[INFO] file $ipset_whitelist_v4: $(lines_number $ipset_whitelist_v4)"
-}
-
-generate_private_v4(){
-    local ipset_private_v4="./ipset_private_v4"
-    
-    echo "create private_v4 hash:net family inet hashsize 4096 maxelem 65536" > $ipset_private_v4
-    echo "add private_v4 0.0.0.0/8" >> $ipset_private_v4
-    echo "add private_v4 10.0.0.0/8" >> $ipset_private_v4
-    echo "add private_v4 127.0.0.0/8" >> $ipset_private_v4
-    echo "add private_v4 169.254.0.0/16" >> $ipset_private_v4
-    echo "add private_v4 172.16.0.0/12" >> $ipset_private_v4
-    echo "add private_v4 198.18.0.0/16" >> $ipset_private_v4
-    echo "add private_v4 192.168.0.0/16" >> $ipset_private_v4
-    echo "add private_v4 224.0.0.0/4" >> $ipset_private_v4
-    echo "add private_v4 240.0.0.0/4" >> $ipset_private_v4
-
-    echo -e "[INFO] file $ipset_private_v4: $(lines_number $ipset_private_v4)"
-}
-pwd
-generate_chnroute_v4_v6
-generate_whitelist_v4
-generate_private_v4
-generate_common_ports
+        ;;
+esac
