@@ -51,7 +51,7 @@ init_ipt_lan_proxy() {
     iptables -t mangle -A PREROUTING -j $tproxy_lan
 
     ip rule add fwmark $tproxy_mark lookup $tproxy_mark
-    ip route add default dev lo table $tproxy_mark
+    ip route add local 0.0.0.0/0 dev lo table $tproxy_mark
 }
 
 clean_remain() {
@@ -66,8 +66,8 @@ clean_remain() {
     iptables -t mangle -X $tproxy_lan 2>/dev/null
 
     ip rule delete fwmark $tproxy_mark lookup $tproxy_mark 2>/dev/null
-    ip route delete default dev lo table $tproxy_mark 2>/dev/null
-
+    ip route delete local 0.0.0.0/0 dev lo table $tproxy_mark 2>/dev/null
+    
     ipset destroy chnroute_v4 2>/dev/null
     ipset destroy whitelist_v4 2>/dev/null
     ipset destroy common_ports 2>/dev/null
